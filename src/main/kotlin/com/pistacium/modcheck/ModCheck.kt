@@ -217,7 +217,7 @@ object ModCheck {
                         }
                     }
                 }
-                "download", "update" -> {
+                "download", "update", "debug" -> {
                     if (function != null) {
                         errorAndExit("Error at arg $i: cannot specify multiple actions")
                     }
@@ -273,6 +273,10 @@ object ModCheck {
         println("  Accessibility: $accessibility")
         println("  Version: $version")
         println("  Mod Folder: $modsDir")
+
+        if (function == "debug") {
+            return
+        }
 
         if (function == "download") {
             // 1. Select mods
