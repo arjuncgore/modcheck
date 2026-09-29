@@ -153,12 +153,16 @@ object ModCheck {
         var category: String? = null
         val os = ModCheckUtils.currentOS()
         var accessibility = false
+        var ranked: Boolean? = null
         var version = readPrismVersion() ?: "1.16.1"
         var path: String? = System.getenv("INST_DIR")
         var function: String? = null
         // Adjust default if instance name contains "ssg"/"set-seed"
         if (System.getenv("INST_NAME")?.contains(Regex("(?i)(?<![a-z])(?:ssg|set.?seed)(?![a-z])")) == true) {
             category = "ssg"
+        }
+        if (System.getenv("INST_NAME")?.contains(Regex("(?i)(?<![a-z])(?:ranked)(?![a-z])")) == true) {
+            ranked = true
         }
 
         // Parsing args
@@ -185,6 +189,9 @@ object ModCheck {
                 }
                 "--accessibility" -> {
                     accessibility = true
+                }
+                "--ranked" -> {
+                    ranked = true
                 }
                 "--version" -> {
                     if (i + 1 < args.size) {
@@ -267,10 +274,22 @@ object ModCheck {
             }
         }
 
+        if (ranked == null) {
+            val rankedMod = getRankedMod(modsDir)
+            if (rankedMod != null) {
+                println("MCSR Ranked found, defaulting ranked to true")
+                ranked = true
+            } else {
+                println("No MCSR Ranked found, defaulting ranked to false")
+                ranked = false
+            }
+        }
+
         println("Options:")
         println("  Category: ${if (category == "rsg") "Random Seed Glitchless" else "Set Seed Glitchless"}")
         println("  OS: ${os.replaceFirstChar { it.uppercase() }}")
         println("  Accessibility: $accessibility")
+        println("  Ranked: $ranked")
         println("  Version: $version")
         println("  Mod Folder: $modsDir")
 
@@ -297,6 +316,7 @@ object ModCheck {
                     if (trait == "ssg-only" && category != "ssg") return@filter false
                     if (trait == "rsg-only" && category != "rsg") return@filter false
                     if (trait == "accessibility" && !accessibility) return@filter false
+                    if (trait == "ranked" && !ranked) return@filter false
                     if (trait == "mac-only" && os != "osx") return@filter false
                 }
                 true
@@ -375,6 +395,19 @@ object ModCheck {
         return null
     }
 
+    private fun getRankedMod(modsDir: Path): FabricModJson? {
+        val modFiles = Files.list(modsDir)
+        for (file in modFiles) {
+            if (file.extension != "jar") continue
+            val fmj = try { ModCheckUtils.readFabricModJson(file) } catch (_: Exception) { null }
+            if (fmj == null) continue
+            if (fmj.id == "mcsrranked") {
+                return fmj
+            }
+        }
+        return null
+    }
+
     private fun printHelpAndExit(ps: PrintStream = err): Nothing {
         ps.println("""
             ModCheck CLI
@@ -386,6 +419,7 @@ object ModCheck {
                 --category <rsg|ssg>        Specify the category (default: rsg)
                 --version <version>         Specify Minecraft version (default: 1.16.1)
                 --accessibility             Include accessibility mods (default: false)
+                --ranked                    Include mcsrranked mod (default: false)
                 --instance <name>           Specify your instance name (uses default PrismLauncher path)
                     or
                 --path <directory>          Specify a different path to your instance
