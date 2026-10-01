@@ -13,6 +13,9 @@ import java.util.concurrent.*
 import javax.swing.JOptionPane
 import kotlin.io.path.extension
 import kotlin.system.exitProcess
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import kotlinx.serialization.json.*
 
 object ModCheck {
     fun setStatus(status: ModCheckStatus) {
@@ -297,6 +300,10 @@ object ModCheck {
             return
         }
 
+        if (ranked == true) {
+            syncRanked(modsDir, version, function)
+        }
+
         if (function == "download") {
             // 1. Select mods
             // assumes that there are no conflicting recommended mods, which is a choice in meta design I will try to stick to
@@ -395,17 +402,101 @@ object ModCheck {
         return null
     }
 
-    private fun getRankedMod(modsDir: Path): FabricModJson? {
+    private fun getRankedMod(modsDir: Path): Pair<Path, FabricModJson>? {
         val modFiles = Files.list(modsDir)
         for (file in modFiles) {
             if (file.extension != "jar") continue
             val fmj = try { ModCheckUtils.readFabricModJson(file) } catch (_: Exception) { null }
             if (fmj == null) continue
             if (fmj.id == "mcsrranked") {
-                return fmj
+                return Pair(file, fmj)
             }
         }
         return null
+    }
+
+    private fun syncRanked(modsDir: Path, mcVersion: String, function: String) {
+        if (mcVersion != "1.16.1") {
+            println("Skipping MCSR Ranked sync, only compatible with Minecraft version 1.16.1")
+            return
+        }
+        val client = OkHttpClient()
+        try {
+            val rankedEndpoint = "https://api.modrinth.com/v2/project/mcsr-ranked/version"
+            val request = Request.Builder()
+                .url(rankedEndpoint)
+                .build()
+
+
+            val latest: String? = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    println("Error fetching ranked mod information: ${response.code}")
+                    return
+                }
+                response.body?.string()
+            }
+
+            val body = latest ?: run {
+                println("Modrinth API response was empty")
+                return
+            }
+            
+            val latestJson = ModCheckUtils.json.parseToJsonElement(body)
+
+            val latestVersion = latestJson.jsonArray[0]
+
+            val versionNumber = latestVersion 
+                .jsonObject["version_number"]!!
+                .jsonPrimitive.content
+            
+            val modUrl = latestVersion 
+                .jsonObject["files"]!!
+                .jsonArray[0]!!
+                .jsonObject["url"]!!
+                .jsonPrimitive.content
+
+            val filename = latestVersion
+                .jsonObject["files"]!!
+                .jsonArray[0]!!
+                .jsonObject["filename"]!!
+                .jsonPrimitive.content
+
+            val installed = getRankedMod(modsDir)
+
+            if (installed == null && function == "update") {
+                return
+            }
+
+            val currentVersion = installed?.second?.version
+
+            if (currentVersion == versionNumber) {
+               println("Ranked Mod is up to date.") 
+               return
+            }
+
+
+            if (installed != null) {
+                println("Deleting out of date Ranked mod")
+                Files.deleteIfExists(installed!!.first)
+            }
+
+            try {
+                println("Downloading MCSR Ranked")
+                val bytes = URI.create(modUrl).toURL().readBytes()
+                Files.write(modsDir.resolve(filename), bytes)
+            } catch (e: Exception) {
+                println("Failed to download MCSR Ranked: ${e.message}")
+            }
+            println("Download MCSR Ranked Complete.")
+
+        }
+        catch (e: Exception) {
+            println("Failed to sync MCSR Ranked: ${e.message}")
+        }
+        finally {
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        }
     }
 
     private fun printHelpAndExit(ps: PrintStream = err): Nothing {
